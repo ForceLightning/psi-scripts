@@ -1,4 +1,5 @@
 from __future__ import annotations
+import argparse
 from collections.abc import Sequence
 import copy
 import json
@@ -46,6 +47,53 @@ def most_frequent(array: Sequence[str | int]):
     return num
 
 
+def keypoints_to_indexed(
+    dataset: Literal["PSI1.0", "PSI2.0"],
+    keypoints: T_PedestrianSkeleton1 | T_PedestrianSkeleton2,
+) -> list[tuple[float, float]]:
+    # 1. Create missing fields if any.
+    for keypoint_name in POSE_KEYPOINTS:
+        if keypoints.get(keypoint_name, None) is None:
+            keypoints[keypoint_name] = (0.0, 0.0)
+        elif isinstance(keypoints[keypoint_name], dict):
+            if keypoints[keypoint_name].get("points", None) is None:
+                keypoints[keypoint_name]["points"] = (0.0, 0.0)
+
+            # 2. If PSI2.0, convert fields to float.
+        match dataset:
+            case "PSI2.0":
+                match (keypoints[keypoint_name]):
+                    case dict():
+                        try:
+                            coords = keypoints[keypoint_name]["points"]
+                            x_str, y_str = coords.split(",")
+                            x = float(x_str)
+                            y = float(y_str)
+                            keypoints[keypoint_name] = (x, y)
+                        except:
+                            keypoints[keypoint_name] = (0.0, 0.0)
+                    case None:
+                        keypoints[keypoint_name] = (0.0, 0.0)
+                    case _:
+                        raise TypeError(
+                            f"Type of keypoints[keypoint_name] ({type(keypoints[keypoint_name])}) is not valid"
+                        )
+            case _:
+                pass
+
+    assert len(keypoints) == len(
+        POSE_KEYPOINTS
+    ), f"Number of filled in keypoints {len(keypoints)} is less than {len(POSE_KEYPOINTS)}"
+
+    # 3. Convert to indexed array based on `POSE_KEYPOINTS`.
+    ret: list[tuple[float, float]] = []
+
+    for i, keypoint_name in enumerate(POSE_KEYPOINTS):
+        ret.append(keypoints[keypoint_name])
+
+    return ret
+
+
 def amend_keyframe_annotations(
     cog_track: T_CognitiveTrack, last_key_frames: list[int], observed_frames: list[int]
 ):
@@ -91,10 +139,10 @@ def amend_keyframe_annotations(
     del cog_track["observed_frames"][last_intent_estimate_idx + 1 :]
     del bboxes[last_intent_estimate_idx + 1 :]
 
-    poses = cog_track["cv_annotations"].get("skeletons", None)
+    poses = cog_track["cv_annotations"].get("skeleton", None)
     if poses is None:
         cv_annot = cog_track["cv_annotations"]
-        raise RuntimeError(f"Pose data is empty. {cv_annot}")
+        raise RuntimeError(f"Pose data is empty. {cv_annot.keys()}")
     else:
         del poses[last_intent_estimate_idx + 1 :]
 
@@ -104,19 +152,29 @@ def amend_keyframe_annotations(
         del cog_ann["description"][last_intent_estimate_idx + 1 :]
 
 
-def main():
+def main(args: argparse.Namespace):
     print("Extend Intent Annotations of PSI 2.0 Dataset.")
 
-    root_path = sys.argv[1]
+    root_path: str = args.root_dir
+    dataset: str = args.dataset
+
+    dataset_path: str = ""
+    match dataset:
+        case "PSI2.0":
+            dataset_path = "PSI2.0_TrainVal"
+        case "PSI1.0":
+            dataset_path = "PSI1.0"
+        case _:
+            raise NotImplementedError
 
     key_frame_anotation_path = os.path.join(
-        root_path, "PSI2.0_TrainVal/annotations/cognitive_annotation_key_frame"
+        root_path, dataset_path, "annotations/cognitive_annotation_key_frame"
     )
     extended_annotation_path = os.path.join(
-        root_path, "PSI2.0_TrainVal/annotations/cognitive_annotation_extended"
+        root_path, dataset_path, "annotations/cognitive_annotation_extended"
     )
     cv_annotation_path = os.path.join(
-        root_path, "PSI2.0_TrainVal/annotations/cv_annotation"
+        root_path, dataset_path, "annotations/cv_annotation"
     )
 
     if not os.path.exists(extended_annotation_path):
@@ -124,7 +182,8 @@ def main():
 
     video_list = sorted(os.listdir(key_frame_anotation_path))
 
-    for vname in tqdm(video_list, desc="Video", position=0, leave=True):
+    mbar = tqdm(video_list, desc="Video", position=0, leave=True)
+    for vname in mbar:
         # 1. load key-frame annotations
         key_intent_ann_file = os.path.join(
             key_frame_anotation_path, vname, "pedestrian_intent.json"
@@ -152,32 +211,49 @@ def main():
             # Retrieve the pose data from
             # `cv_ann.frames.frame_<fid>.cv_annotation.pedestrian_track_<tid>.skeleton`
             # and insert all frames into
-            # `extended_intent_ann.pedestrians.track_<tid>.cv_annotations.skeletons`
+            # `extended_intent_ann.pedestrians.track_<tid>.cv_annotations.skeleton`
             # TODO: Verify that it works. (It doesn't)
             # TODO: Interpolate between pose keyframes.
             observed_frames = ped_track["observed_frames"]
+            pose_data_key = "skeleton" if dataset == "PSI2.0" else "joints"
             for fid in tqdm(
                 observed_frames, desc="Extracting Poses", position=2, leave=False
             ):
                 if (
                     pose_data := cv_ann["frames"][f"frame_{fid}"]["cv_annotation"][
                         f"pedestrian_{ped_k}"
-                    ].get("skeleton", None)
+                    ].get(pose_data_key, None)
                 ) is not None:
                     if (
-                        skeletons := ped_track["cv_annotations"].get("skeletons", None)
+                        skeletons := ped_track["cv_annotations"].get(
+                            pose_data_key, None
+                        )
                     ) is None:
-                        ped_track["cv_annotations"]["skeletons"] = [pose_data]
+                        converted_pose_data = keypoints_to_indexed(dataset, pose_data)
+                        ped_track["cv_annotations"][pose_data_key] = [
+                            converted_pose_data
+                        ]
                     else:
-                        skeletons.append(pose_data)
+                        converted_pose_data = keypoints_to_indexed(dataset, pose_data)
+                        skeletons.append(converted_pose_data)
+                else:
+                    if (
+                        bbox_data := cv_ann["frames"][f"frame_{fid}"]["cv_annotation"][
+                            f"pedestrian_{ped_k}"
+                        ].get("bbox", None)
+                    ) is not None:
+                        mbar.write(f"{fid} is observed but has no bbox nor pose data")
+                    else:
+                        mbar.write(f"{fid} is observed but has no pose data.")
 
             # stuff for asserts
             # following line should error if empty
-            skeletons = ped_track["cv_annotations"]["skeletons"]
+            skeletons = ped_track["cv_annotations"][pose_data_key]
             bboxes = ped_track["cv_annotations"]["bboxes"]
             assert len(skeletons) == len(
-                bboxes
-            ), f"len(skeletons): {len(skeletons)}, len(bboxes): {len(bboxes)}"
+                observed_frames
+            ), f"len(skeletons): {len(skeletons)}, len(observed_frames): {len(observed_frames)}"
+            ped_track["cv_annotations"]["skeleton"] = skeletons
             for ann_k, cog_ann in tqdm(
                 ped_track["cognitive_annotations"].items(),
                 desc="Extracting cognitive annotations",
@@ -279,9 +355,9 @@ def main():
             )
             _ = file.write(json_string)
 
-        print(
-            vname,
-            ": Original observed frames: {} --> valid intent estimation frames: {}".format(
+        mbar.write(
+            "{}: Original observed frames: {} --> valid intent estimation frames: {}".format(
+                vname,
                 len(key_intent_ann["pedestrians"][ped_k]["observed_frames"]),
                 len(extended_intent_ann["pedestrians"][ped_k]["observed_frames"]),
             ),
@@ -289,4 +365,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+
+    _ = parser.add_argument("root_dir", type=str)
+
+    _ = parser.add_argument("--dataset", default="PSI2.0", choices=["PSI2.0", "PSI1.0"])
+
+    args = parser.parse_args()
+
+    main(args)

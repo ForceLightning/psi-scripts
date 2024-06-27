@@ -34,16 +34,27 @@ class T_TrafficTrack(TypedDict):
     observed_frames: list[int]  # arbitrary length
 
 
-# Path: root.frame_<fid>.cv_annotation.pedestrian_track_<tid>
-class T_PedestrianTrack(T_TrafficTrack):
-    """Object containing pedestrian type track data.
+class T_PedestrianTrack1(T_TrafficTrack):
+    """Object containing pedestrian type track data for the PSI1.0 Dataset
 
     Path: `root.frame_<fid>.cv_annotation.pedestrian_track_<tid>`
 
     :var T_PedestrianSkeleton skeleton: Pose data.
     """
 
-    skeleton: T_PedestrianSkeleton
+    joints: T_PedestrianSkeleton1
+
+
+# Path: root.frame_<fid>.cv_annotation.pedestrian_track_<tid>
+class T_PedestrianTrack2(T_TrafficTrack):
+    """Object containing pedestrian type track data for the PSI2.0 Dataset
+
+    Path: `root.frame_<fid>.cv_annotation.pedestrian_track_<tid>`
+
+    :var T_PedestrianSkeleton skeleton: Pose data.
+    """
+
+    skeleton: T_PedestrianSkeleton2
 
 
 # We have to do it this way because of the brackets in the key name.
@@ -51,7 +62,9 @@ class T_PedestrianTrack(T_TrafficTrack):
 T_FrameAnnotation = TypedDict(
     "T_FrameAnnotation",
     {
-        "cv_annotation": dict[str, T_TrafficTrack | T_PedestrianTrack],
+        "cv_annotation": dict[
+            str, T_TrafficTrack | T_PedestrianTrack1 | T_PedestrianTrack2
+        ],
         "speed(km/hr)": float,
         "gps": tuple[str, str],
         "time": str,
@@ -69,8 +82,52 @@ Path: `root.frame_<fid>`
 
 
 # Path: root.frame_<fid>.cv_annotation.pedestrian_track_<tid>.skeleton
-class T_PedestrianSkeleton(TypedDict):
-    """Object containing pose information.
+class T_PedestrianSkeleton1(TypedDict):
+    """Object containing pose information for the PSI1.0 dataset.
+
+    Path: `root.frame_<fid>.cv_annotation.pedestrian_track_<tid>.skeleton`
+
+    :var list[float] nose: Nose
+    :var list[float] left_eye: Left Eye
+    :var list[float] right_eye: Right Eye
+    :var list[float] left_ear: Left Ear
+    :var list[float] right_ear: Right Ear
+    :var list[float] left_shoulder: Left Shoulder
+    :var list[float] right_shoulder: Right Shoulder
+    :var list[float] left_elbow: Left Elbow
+    :var list[float] right_elbow: Right Elbow
+    :var list[float] left_wrist: Left Wrist
+    :var list[float] right_wrist: Right Wrist
+    :var list[float] left_hip: Left Hip
+    :var list[float] right_hip: Right Hip
+    :var list[float] left_knee: Left Knee
+    :var list[float] right_knee: Right Knee
+    :var list[float] left_ankle: Left Ankle
+    :var list[float] right_ankle: Right Ankle
+    """
+
+    nose: list[float]
+    left_eye: list[float]
+    right_eye: list[float]
+    left_ear: list[float]
+    right_ear: list[float]
+    left_shoulder: list[float]
+    right_shoulder: list[float]
+    left_elbow: list[float]
+    right_elbow: list[float]
+    left_wrist: list[float]
+    right_wrist: list[float]
+    left_hip: list[float]
+    right_hip: list[float]
+    left_knee: list[float]
+    right_knee: list[float]
+    left_ankle: list[float]
+    right_ankle: list[float]
+
+
+# Path: root.frame_<fid>.cv_annotation.pedestrian_track_<tid>.skeleton
+class T_PedestrianSkeleton2(TypedDict):
+    """Object containing pose information for the PSI2.0 dataset.
 
     Path: `root.frame_<fid>.cv_annotation.pedestrian_track_<tid>.skeleton`
 
@@ -93,28 +150,28 @@ class T_PedestrianSkeleton(TypedDict):
     :var T_KeyPoint right_ankle: Right Ankle
     """
 
-    nose: T_KeyPoint
-    left_eye: T_KeyPoint
-    right_eye: T_KeyPoint
-    left_ear: T_KeyPoint
-    right_ear: T_KeyPoint
-    left_shoulder: T_KeyPoint
-    right_shoulder: T_KeyPoint
-    left_elbow: T_KeyPoint
-    right_elbow: T_KeyPoint
-    left_wrist: T_KeyPoint
-    right_wrist: T_KeyPoint
-    left_hip: T_KeyPoint
-    right_hip: T_KeyPoint
-    left_knee: T_KeyPoint
-    right_knee: T_KeyPoint
-    left_ankle: T_KeyPoint
-    right_ankle: T_KeyPoint
+    nose: T_KeyPoint2
+    left_eye: T_KeyPoint2
+    right_eye: T_KeyPoint2
+    left_ear: T_KeyPoint2
+    right_ear: T_KeyPoint2
+    left_shoulder: T_KeyPoint2
+    right_shoulder: T_KeyPoint2
+    left_elbow: T_KeyPoint2
+    right_elbow: T_KeyPoint2
+    left_wrist: T_KeyPoint2
+    right_wrist: T_KeyPoint2
+    left_hip: T_KeyPoint2
+    right_hip: T_KeyPoint2
+    left_knee: T_KeyPoint2
+    right_knee: T_KeyPoint2
+    left_ankle: T_KeyPoint2
+    right_ankle: T_KeyPoint2
 
 
 # Path: root.frame_<fid>.cv_annotation.pedestrian_track_<tid>.skeleton.<part>
-class T_KeyPoint(TypedDict):
-    """Object containing pose keypoint information
+class T_KeyPoint2(TypedDict):
+    """Object containing pose keypoint information for the PSI2.0 dataset
 
     Path: `root.frame_<fid>.cv_annotation.pedestrian_track_<tid>.skeleton.<part>`
 
@@ -152,12 +209,23 @@ class T_CognitiveTrack(TypedDict):
     """
 
     observed_frames: list[int]
-    cv_annotations: T_TrackBboxes | T_TrackAnnotations
+    cv_annotations: T_TrackBboxes2 | T_TrackAnnotations1 | T_TrackAnnotations2
     cognitive_annotations: dict[str, T_CognitiveAnnotation]
 
 
-class T_TrackBboxes(TypedDict):
-    """Container of only bounding box data.
+class T_TrackBboxes1(TypedDict):
+    """Container of only bounding box data for the PSI1.0 dataset.
+
+    Path: `root.pedestrians.track_<tid>.cv_annotations`
+
+    :var list[list[float]] bboxes: List of bounding box coordinates, inner length 4.
+    """
+
+    bbox: list[list[float]]  # arbirtary outer dim, inner dim 4.
+
+
+class T_TrackBboxes2(TypedDict):
+    """Container of only bounding box data for the PSI2.0 dataset.
 
     Path: `root.pedestrians.track_<tid>.cv_annotations`
 
@@ -167,15 +235,26 @@ class T_TrackBboxes(TypedDict):
     bboxes: list[list[float]]  # arbirtary outer dim, inner dim 4.
 
 
-class T_TrackAnnotations(T_TrackBboxes):
-    """Container of bounding box and pose data.
+class T_TrackAnnotations1(T_TrackBboxes2):
+    """Container of bounding box and pose data for the PSI1.0 dataset.
 
     Path: `root.pedestrians.track_<tid>.cv_annotations`
 
     :var list[T_PedestrianSkeleton] skeleton: List of pose data.
     """
 
-    skeletons: list[T_PedestrianSkeleton]
+    joints: list[T_PedestrianSkeleton1]
+
+
+class T_TrackAnnotations2(T_TrackBboxes2):
+    """Container of bounding box and pose data for the PSI2.0 dataset.
+
+    Path: `root.pedestrians.track_<tid>.cv_annotations`
+
+    :var list[T_PedestrianSkeleton] skeleton: List of pose data.
+    """
+
+    skeleton: list[T_PedestrianSkeleton2]
 
 
 class T_CognitiveAnnotation(TypedDict):
