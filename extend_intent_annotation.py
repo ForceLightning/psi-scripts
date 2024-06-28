@@ -1,16 +1,15 @@
 from __future__ import annotations
 import argparse
 from collections.abc import Sequence
-from dataclasses import dataclass
 import copy
+from dataclasses import dataclass
 import json
 import os
-import sys
-from typing import Any, cast
+from typing import cast
 
 from tqdm.auto import tqdm
 
-from cv_annotation_schema import *
+from .cv_annotation_schema import *
 
 POSE_KEYPOINTS = [
     "nose",
@@ -96,7 +95,7 @@ def keypoints_to_indexed(
     ), f"Number of filled in keypoints {len(keypoints)} is less than {len(POSE_KEYPOINTS)}"
 
     # 4. Convert to indexed array based on `POSE_KEYPOINTS`.
-    ret: list[tuple[float, float]] = []
+    ret: list[tuple[float, float]] = [(0.0, 0.0)] * 17
 
     for i, keypoint_name in enumerate(POSE_KEYPOINTS):
         keypoint = keypoints[keypoint_name]
@@ -104,7 +103,9 @@ def keypoints_to_indexed(
             assert not observed_pose_data[
                 i
             ], f"Observed mask at index {i} must be False!"
-        ret.append(keypoints[keypoint_name])
+        ret[i] == keypoint
+
+    assert len(ret) == 17
 
     return ret, observed_pose_data
 
@@ -162,7 +163,7 @@ def amend_keyframe_annotations(
         cv_annot = cog_track["cv_annotations"]
         if args.allow_empty_poses:
             num_frames = len(bboxes)
-            cog_track["cv_annotations"]["skeleton"] = [[0.0, 0.0] * num_frames]
+            cog_track["cv_annotations"]["skeleton"] = [[(0.0, 0.0)] * 17] * num_frames
         else:
             raise RuntimeError(f"Pose data is empty. {cv_annot.keys()}")
     else:
@@ -251,16 +252,21 @@ def main(args: ScriptArguments):
             for fid in tqdm(
                 observed_frames, desc="Extracting Poses", position=2, leave=False
             ):  # for each frame in observed frames
+                try:
+                    len_poses = len(ext_ped_track["cv_annotations"][pose_data_key])
+                    assert len_poses <= len(ext_ped_track["observed_frames"])
+                except:
+                    pass
                 if (
                     pose_data := cv_ann["frames"][f"frame_{fid}"]["cv_annotation"][
                         f"pedestrian_{ped_k}"
                     ].get(pose_data_key, None)
-                ) is not None:  # if pose data key does exist in anns
+                ) is not None:  # if pose data key does exist in cv anns
                     if (
                         skeletons := ext_ped_track["cv_annotations"].get(
                             pose_data_key, None
                         )
-                    ) is None:  # if pose data is empty
+                    ) is None:  # if pose data in ext ann is empty
                         converted_pose_data, observed_pose_data = keypoints_to_indexed(
                             dataset, pose_data
                         )
@@ -277,7 +283,7 @@ def main(args: ScriptArguments):
                             ext_ped_track["cv_annotations"]["observed_skeleton"] = [
                                 observed_pose_data
                             ]
-                    else:  # otherwise, append to pose data arrays
+                    else:  # otherwise, append to ext ann pose data arrays
                         converted_pose_data, observed_pose_data = keypoints_to_indexed(
                             dataset, pose_data
                         )
@@ -300,17 +306,60 @@ def main(args: ScriptArguments):
                             "bbox", None
                         )  # if bboxes also empty
                     ) is not None:
+                        # check if extended annotations contain bbox data:
+                        if (
+                            ext_bbox_data := ext_ped_track["cv_annotations"].get(
+                                "bboxes", None
+                            )
+                        ) is not None:
+                            empty_pose_data = [[(0.0, 0.0)] * 17] * len(ext_bbox_data)
+                            empty_observed_poses = [[False] * 17] * len(ext_bbox_data)
+                            ext_ped_track["cv_annotations"][
+                                pose_data_key
+                            ] = empty_pose_data
+                            ext_ped_track["cv_annotations"][
+                                "observed_skeleton"
+                            ] = empty_observed_poses
+                            break
                         mbar.write(f"{fid} is observed but has no bbox nor pose data")
                     else:  # otherwise
                         if args.allow_empty_poses:  # write 0s to pose and pose mask
-                            converted_pose_data = [(0.0, 0.0) * 17]
-                            ext_ped_track["cv_annotations"][pose_data_key] = [
-                                converted_pose_data
-                            ]
-                            observed_pose_data: list[bool] = [False] * 17
-                            ext_ped_track["cv_annotations"]["observed_skeleton"] = [
-                                observed_pose_data
-                            ]
+                            if (
+                                ext_bbox_data := ext_ped_track["cv_annotations"].get(
+                                    "bboxes", None
+                                )
+                            ) is not None:
+                                empty_pose_data = [[(0.0, 0.0)] * 17] * len(
+                                    ext_bbox_data
+                                )
+                                empty_observed_poses = [[False] * 17] * len(
+                                    ext_bbox_data
+                                )
+                                ext_ped_track["cv_annotations"][
+                                    pose_data_key
+                                ] = empty_pose_data
+                                ext_ped_track["cv_annotations"][
+                                    "observed_skeleton"
+                                ] = empty_observed_poses
+                                break
+                            else:
+                                pose_data = [(0.0, 0.0)] * 17
+                                pose_mask = [False] * 17
+                                try:
+                                    ext_ped_track["cv_annotations"][
+                                        pose_data_key
+                                    ].append(pose_data)
+                                    ext_ped_track["cv_annotations"][
+                                        "observed_skeleton"
+                                    ].append(pose_mask)
+                                except:
+                                    ext_ped_track["cv_annotations"][pose_data_key] = [
+                                        pose_data
+                                    ]
+                                    ext_ped_track["cv_annotations"][
+                                        "observed_skeleton"
+                                    ] = [pose_mask]
+
                         else:
                             mbar.write(f"{fid} is observed but has no pose data.")
 
@@ -320,8 +369,17 @@ def main(args: ScriptArguments):
             pose_mask = ext_ped_track["cv_annotations"]["observed_skeleton"]
             bboxes = ext_ped_track["cv_annotations"]["bboxes"]
             assert (
-                len(skeletons) == len(observed_frames) == len(pose_mask)
-            ), f"len(skeletons): {len(skeletons)}, len(observed_frames): {len(observed_frames)}, len(pose_mask): {len(pose_mask)}"
+                len(skeletons) == len(observed_frames) == len(pose_mask) == len(bboxes)
+            ), (
+                f"len(skeletons): {len(skeletons)}, len(observed_frames): "
+                + f"{len(observed_frames)}, len(pose_mask): {len(pose_mask)},"
+                + f"len(bboxes): {len(bboxes)}"
+            )
+
+            assert all(
+                len(skeleton) == 17 for skeleton in skeletons
+            ), "pose data length not 17!"
+
             ext_ped_track["cv_annotations"]["skeleton"] = skeletons
             if pose_data_key != "skeleton":
                 del ext_ped_track["cv_annotations"][pose_data_key]

@@ -300,3 +300,36 @@ class T_Prompts(TypedDict):
     roadUsersRelated: str
     roadFactors: str
     norms: str
+
+
+class T_ExtendedIntentAnnoSchema(TypedDict):
+    video_name: str
+    pedestrians: dict[str, T_ExtendedCognitiveTrack]
+
+
+class T_ExtendedCognitiveTrack(TypedDict):
+    observed_frames: list[int]
+    cv_annotations: T_TrackAnnotationsExtended
+    cognitive_annotations: dict[str, T_CognitiveAnnotation]
+
+
+class T_TrackAnnotationsExtended(TypedDict):
+    bboxes: list[list[float]]
+    skeleton: list[list[tuple[float, float]]]
+    observed_skeleton: list[list[bool]]
+
+
+class T_ExtendedCognitiveDrivingSchema(TypedDict):
+    video_name: str
+    frames: dict[str, T_DrivingCognitiveAnno]
+
+
+class T_DrivingCognitiveAnno(TypedDict):
+    cognitive_annotation: dict[str, T_InnerDrivingCognitiveAnno]
+
+
+class T_InnerDrivingCognitiveAnno(TypedDict):
+    driving_decision_speed: Literal["increaseSpeed", "decreaseSpeed", "maintainSpeed"]
+    driving_decision_direction: Literal["goStraight", "turnLeft", "turnRight"]
+    explanation: str
+    key_frame: int
