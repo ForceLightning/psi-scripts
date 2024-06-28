@@ -240,12 +240,13 @@ def main(args: ScriptArguments):
             position=1,
             leave=False,
         ):
+            ext_ped_track = extended_intent_ann["pedestrians"][ped_k]
             # Retrieve the pose data from
             # `cv_ann.frames.frame_<fid>.cv_annotation.pedestrian_track_<tid>.skeleton`
             # and insert all frames into
             # `extended_intent_ann.pedestrians.track_<tid>.cv_annotations.skeleton`
             # TODO: Interpolate between pose keyframes.
-            observed_frames = ped_track["observed_frames"]
+            observed_frames = ext_ped_track["observed_frames"]
             pose_data_key = "skeleton" if dataset == "PSI2.0" else "joints"
             for fid in tqdm(
                 observed_frames, desc="Extracting Poses", position=2, leave=False
@@ -256,24 +257,24 @@ def main(args: ScriptArguments):
                     ].get(pose_data_key, None)
                 ) is not None:  # if pose data key does exist in anns
                     if (
-                        skeletons := ped_track["cv_annotations"].get(
+                        skeletons := ext_ped_track["cv_annotations"].get(
                             pose_data_key, None
                         )
                     ) is None:  # if pose data is empty
                         converted_pose_data, observed_pose_data = keypoints_to_indexed(
                             dataset, pose_data
                         )
-                        ped_track["cv_annotations"][pose_data_key] = [
+                        ext_ped_track["cv_annotations"][pose_data_key] = [
                             converted_pose_data
                         ]
                         if (
-                            pose_mask := ped_track["cv_annotations"].get(
+                            pose_mask := ext_ped_track["cv_annotations"].get(
                                 "observed_skeleton", None
                             )
                         ) is not None:  # if there is an array of masks
                             pose_mask.append(observed_pose_data)
                         else:
-                            ped_track["cv_annotations"]["observed_skeleton"] = [
+                            ext_ped_track["cv_annotations"]["observed_skeleton"] = [
                                 observed_pose_data
                             ]
                     else:  # otherwise, append to pose data arrays
@@ -282,13 +283,13 @@ def main(args: ScriptArguments):
                         )
                         skeletons.append(converted_pose_data)
                         if (
-                            pose_mask := ped_track["cv_annotations"].get(
+                            pose_mask := ext_ped_track["cv_annotations"].get(
                                 "observed_skeleton", None
                             )
                         ) is not None:  # if there already is an array of masks
                             pose_mask.append(observed_pose_data)
                         else:
-                            ped_track["cv_annotations"]["observed_skeleton"] = [
+                            ext_ped_track["cv_annotations"]["observed_skeleton"] = [
                                 observed_pose_data
                             ]
                 else:  # if it doesn't exist
@@ -303,11 +304,11 @@ def main(args: ScriptArguments):
                     else:  # otherwise
                         if args.allow_empty_poses:  # write 0s to pose and pose mask
                             converted_pose_data = [(0.0, 0.0) * 17]
-                            ped_track["cv_annotations"][pose_data_key] = [
+                            ext_ped_track["cv_annotations"][pose_data_key] = [
                                 converted_pose_data
                             ]
                             observed_pose_data: list[bool] = [False] * 17
-                            ped_track["cv_annotations"]["observed_skeleton"] = [
+                            ext_ped_track["cv_annotations"]["observed_skeleton"] = [
                                 observed_pose_data
                             ]
                         else:
@@ -315,15 +316,17 @@ def main(args: ScriptArguments):
 
             # stuff for asserts
             # following line should error if empty
-            skeletons = ped_track["cv_annotations"][pose_data_key]
-            pose_mask = ped_track["cv_annotations"]["observed_skeleton"]
-            bboxes = ped_track["cv_annotations"]["bboxes"]
-            assert len(skeletons) == len(
-                observed_frames
-            ), f"len(skeletons): {len(skeletons)}, len(observed_frames): {len(observed_frames)}"
-            ped_track["cv_annotations"]["skeleton"] = skeletons
+            skeletons = ext_ped_track["cv_annotations"][pose_data_key]
+            pose_mask = ext_ped_track["cv_annotations"]["observed_skeleton"]
+            bboxes = ext_ped_track["cv_annotations"]["bboxes"]
+            assert (
+                len(skeletons) == len(observed_frames) == len(pose_mask)
+            ), f"len(skeletons): {len(skeletons)}, len(observed_frames): {len(observed_frames)}, len(pose_mask): {len(pose_mask)}"
+            ext_ped_track["cv_annotations"]["skeleton"] = skeletons
+            if pose_data_key != "skeleton":
+                del ext_ped_track["cv_annotations"][pose_data_key]
             for ann_k, cog_ann in tqdm(
-                ped_track["cognitive_annotations"].items(),
+                ext_ped_track["cognitive_annotations"].items(),
                 desc="Extracting cognitive annotations",
                 position=2,
                 leave=False,
