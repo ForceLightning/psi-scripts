@@ -1,10 +1,12 @@
 from __future__ import annotations
 import argparse
 from collections.abc import Sequence
+from dataclasses import dataclass
 import copy
 import json
 import os
 import sys
+from typing import Any, cast
 
 from tqdm.auto import tqdm
 
@@ -50,16 +52,22 @@ def most_frequent(array: Sequence[str | int]):
 def keypoints_to_indexed(
     dataset: Literal["PSI1.0", "PSI2.0"],
     keypoints: T_PedestrianSkeleton1 | T_PedestrianSkeleton2,
-) -> list[tuple[float, float]]:
-    # 1. Create missing fields if any.
-    for keypoint_name in POSE_KEYPOINTS:
+) -> tuple[list[tuple[float, float]], list[bool]]:
+    # 1. Create "observed" mask for pose.
+    observed_pose_data: list[bool] = [True] * 17
+
+    # 2. Create missing fields if any.
+    for i, keypoint_name in enumerate(POSE_KEYPOINTS):
         if keypoints.get(keypoint_name, None) is None:
             keypoints[keypoint_name] = (0.0, 0.0)
+            observed_pose_data[i] = False
+
         elif isinstance(keypoints[keypoint_name], dict):
             if keypoints[keypoint_name].get("points", None) is None:
                 keypoints[keypoint_name]["points"] = (0.0, 0.0)
+                observed_pose_data[i] = False
 
-            # 2. If PSI2.0, convert fields to float.
+        # 3. If PSI2.0, convert fields to float.
         match dataset:
             case "PSI2.0":
                 match (keypoints[keypoint_name]):
@@ -72,8 +80,10 @@ def keypoints_to_indexed(
                             keypoints[keypoint_name] = (x, y)
                         except:
                             keypoints[keypoint_name] = (0.0, 0.0)
+                            observed_pose_data[i] = False
                     case None:
                         keypoints[keypoint_name] = (0.0, 0.0)
+                        observed_pose_data[i] = False
                     case _:
                         raise TypeError(
                             f"Type of keypoints[keypoint_name] ({type(keypoints[keypoint_name])}) is not valid"
@@ -85,17 +95,25 @@ def keypoints_to_indexed(
         POSE_KEYPOINTS
     ), f"Number of filled in keypoints {len(keypoints)} is less than {len(POSE_KEYPOINTS)}"
 
-    # 3. Convert to indexed array based on `POSE_KEYPOINTS`.
+    # 4. Convert to indexed array based on `POSE_KEYPOINTS`.
     ret: list[tuple[float, float]] = []
 
     for i, keypoint_name in enumerate(POSE_KEYPOINTS):
+        keypoint = keypoints[keypoint_name]
+        if keypoint == (0.0, 0.0):
+            assert not observed_pose_data[
+                i
+            ], f"Observed mask at index {i} must be False!"
         ret.append(keypoints[keypoint_name])
 
-    return ret
+    return ret, observed_pose_data
 
 
 def amend_keyframe_annotations(
-    cog_track: T_CognitiveTrack, last_key_frames: list[int], observed_frames: list[int]
+    args: ScriptArguments,
+    cog_track: T_CognitiveTrack,
+    last_key_frames: list[int],
+    observed_frames: list[int],
 ):
     bboxes = cog_track["cv_annotations"]["bboxes"]
 
@@ -142,7 +160,11 @@ def amend_keyframe_annotations(
     poses = cog_track["cv_annotations"].get("skeleton", None)
     if poses is None:
         cv_annot = cog_track["cv_annotations"]
-        raise RuntimeError(f"Pose data is empty. {cv_annot.keys()}")
+        if args.allow_empty_poses:
+            num_frames = len(bboxes)
+            cog_track["cv_annotations"]["skeleton"] = [[0.0, 0.0] * num_frames]
+        else:
+            raise RuntimeError(f"Pose data is empty. {cv_annot.keys()}")
     else:
         del poses[last_intent_estimate_idx + 1 :]
 
@@ -152,7 +174,7 @@ def amend_keyframe_annotations(
         del cog_ann["description"][last_intent_estimate_idx + 1 :]
 
 
-def main(args: argparse.Namespace):
+def main(args: ScriptArguments):
     print("Extend Intent Annotations of PSI 2.0 Dataset.")
 
     root_path: str = args.root_dir
@@ -167,7 +189,7 @@ def main(args: argparse.Namespace):
         case _:
             raise NotImplementedError
 
-    key_frame_anotation_path = os.path.join(
+    key_frame_annotation_path = os.path.join(
         root_path, dataset_path, "annotations/cognitive_annotation_key_frame"
     )
     extended_annotation_path = os.path.join(
@@ -180,21 +202,31 @@ def main(args: argparse.Namespace):
     if not os.path.exists(extended_annotation_path):
         os.makedirs(extended_annotation_path)
 
-    video_list = sorted(os.listdir(key_frame_anotation_path))
+    video_list = sorted(os.listdir(key_frame_annotation_path))
 
     mbar = tqdm(video_list, desc="Video", position=0, leave=True)
     for vname in mbar:
         # 1. load key-frame annotations
-        key_intent_ann_file = os.path.join(
-            key_frame_anotation_path, vname, "pedestrian_intent.json"
-        )
-        with open(key_intent_ann_file, "r") as f:
-            key_intent_ann: T_PSIPedIntentCognitiveKeyframeDB = json.load(f)
+        if os.path.exists(
+            kf_ann_path := os.path.join(
+                key_frame_annotation_path, vname, "pedestrian_intent.json"
+            )
+        ):
+            with open(kf_ann_path, "r", encoding="utf-8") as f:
+                key_intent_ann: T_PSIPedIntentCognitiveKeyframeDB = json.load(f)
+        else:
+            mbar.write(f"Keyframe annotations for {vname} not found.")
+            continue
 
         # 1.2 load cv_annotations
-        cv_ann_file = os.path.join(cv_annotation_path, vname, "cv_annotation.json")
-        with open(cv_ann_file, "r", encoding="utf-8") as f:
-            cv_ann: T_PSICVAnnDatabase = json.load(f)
+        if os.path.exists(
+            cv_ann_file := os.path.join(cv_annotation_path, vname, "cv_annotation.json")
+        ):
+            with open(cv_ann_file, "r", encoding="utf-8") as f:
+                cv_ann: T_PSICVAnnDatabase = json.load(f)
+        else:
+            mbar.write(f"CV annotations for {vname} not found.")
+            continue
 
         # 2. extend annotations (intent & description) - intent to the future frames,
         # description to the prior frames
@@ -212,43 +244,79 @@ def main(args: argparse.Namespace):
             # `cv_ann.frames.frame_<fid>.cv_annotation.pedestrian_track_<tid>.skeleton`
             # and insert all frames into
             # `extended_intent_ann.pedestrians.track_<tid>.cv_annotations.skeleton`
-            # TODO: Verify that it works. (It doesn't)
             # TODO: Interpolate between pose keyframes.
             observed_frames = ped_track["observed_frames"]
             pose_data_key = "skeleton" if dataset == "PSI2.0" else "joints"
             for fid in tqdm(
                 observed_frames, desc="Extracting Poses", position=2, leave=False
-            ):
+            ):  # for each frame in observed frames
                 if (
                     pose_data := cv_ann["frames"][f"frame_{fid}"]["cv_annotation"][
                         f"pedestrian_{ped_k}"
                     ].get(pose_data_key, None)
-                ) is not None:
+                ) is not None:  # if pose data key does exist in anns
                     if (
                         skeletons := ped_track["cv_annotations"].get(
                             pose_data_key, None
                         )
-                    ) is None:
-                        converted_pose_data = keypoints_to_indexed(dataset, pose_data)
+                    ) is None:  # if pose data is empty
+                        converted_pose_data, observed_pose_data = keypoints_to_indexed(
+                            dataset, pose_data
+                        )
                         ped_track["cv_annotations"][pose_data_key] = [
                             converted_pose_data
                         ]
-                    else:
-                        converted_pose_data = keypoints_to_indexed(dataset, pose_data)
+                        if (
+                            pose_mask := ped_track["cv_annotations"].get(
+                                "observed_skeleton", None
+                            )
+                        ) is not None:  # if there is an array of masks
+                            pose_mask.append(observed_pose_data)
+                        else:
+                            ped_track["cv_annotations"]["observed_skeleton"] = [
+                                observed_pose_data
+                            ]
+                    else:  # otherwise, append to pose data arrays
+                        converted_pose_data, observed_pose_data = keypoints_to_indexed(
+                            dataset, pose_data
+                        )
                         skeletons.append(converted_pose_data)
-                else:
+                        if (
+                            pose_mask := ped_track["cv_annotations"].get(
+                                "observed_skeleton", None
+                            )
+                        ) is not None:  # if there already is an array of masks
+                            pose_mask.append(observed_pose_data)
+                        else:
+                            ped_track["cv_annotations"]["observed_skeleton"] = [
+                                observed_pose_data
+                            ]
+                else:  # if it doesn't exist
                     if (
                         bbox_data := cv_ann["frames"][f"frame_{fid}"]["cv_annotation"][
                             f"pedestrian_{ped_k}"
-                        ].get("bbox", None)
+                        ].get(
+                            "bbox", None
+                        )  # if bboxes also empty
                     ) is not None:
                         mbar.write(f"{fid} is observed but has no bbox nor pose data")
-                    else:
-                        mbar.write(f"{fid} is observed but has no pose data.")
+                    else:  # otherwise
+                        if args.allow_empty_poses:  # write 0s to pose and pose mask
+                            converted_pose_data = [(0.0, 0.0) * 17]
+                            ped_track["cv_annotations"][pose_data_key] = [
+                                converted_pose_data
+                            ]
+                            observed_pose_data: list[bool] = [False] * 17
+                            ped_track["cv_annotations"]["observed_skeleton"] = [
+                                observed_pose_data
+                            ]
+                        else:
+                            mbar.write(f"{fid} is observed but has no pose data.")
 
             # stuff for asserts
             # following line should error if empty
             skeletons = ped_track["cv_annotations"][pose_data_key]
+            pose_mask = ped_track["cv_annotations"]["observed_skeleton"]
             bboxes = ped_track["cv_annotations"]["bboxes"]
             assert len(skeletons) == len(
                 observed_frames
@@ -334,7 +402,9 @@ def main(args: argparse.Namespace):
 
             # only apply to the 'cross' cases
             if most_frequent(last_intents) == "cross":
-                amend_keyframe_annotations(cog_track, last_key_frames, observed_frames)
+                amend_keyframe_annotations(
+                    args, cog_track, last_key_frames, observed_frames
+                )
 
         # 4. output extended annotations
         output_dir = os.path.join(extended_annotation_path, vname)
@@ -364,6 +434,13 @@ def main(args: argparse.Namespace):
         )
 
 
+@dataclass
+class ScriptArguments:
+    root_dir: str
+    dataset: Literal["PSI1.0", "PSI2.0"] = "PSI2.0"
+    allow_empty_poses: bool = False
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
@@ -371,6 +448,8 @@ if __name__ == "__main__":
 
     _ = parser.add_argument("--dataset", default="PSI2.0", choices=["PSI2.0", "PSI1.0"])
 
-    args = parser.parse_args()
+    _ = parser.add_argument("--allow_empty_poses", action="store_true")
+
+    args = cast(ScriptArguments, parser.parse_args())  # type: ignore[reportInvalidCast]
 
     main(args)
