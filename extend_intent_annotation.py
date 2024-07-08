@@ -1,10 +1,11 @@
 from __future__ import annotations
+
 import argparse
-from collections.abc import Sequence
 import copy
-from dataclasses import dataclass
 import json
 import os
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import cast
 
 from tqdm.auto import tqdm
@@ -205,7 +206,7 @@ def main(args: ScriptArguments):
 
     video_list = sorted(os.listdir(key_frame_annotation_path))
 
-    mbar = tqdm(video_list, desc="Video", position=0, leave=True)
+    mbar = tqdm(video_list, desc="Video", leave=True)
     for vname in mbar:
         # 1. load key-frame annotations
         if os.path.exists(
@@ -238,7 +239,6 @@ def main(args: ScriptArguments):
         for ped_k, ped_track in tqdm(
             key_intent_ann["pedestrians"].items(),
             desc="Pedstrian",
-            position=1,
             leave=False,
         ):
             ext_ped_track = extended_intent_ann["pedestrians"][ped_k]
@@ -250,7 +250,7 @@ def main(args: ScriptArguments):
             observed_frames = ext_ped_track["observed_frames"]
             pose_data_key = "skeleton" if dataset == "PSI2.0" else "joints"
             for fid in tqdm(
-                observed_frames, desc="Extracting Poses", position=2, leave=False
+                observed_frames, desc="Extracting Poses", leave=False
             ):  # for each frame in observed frames
                 try:
                     len_poses = len(ext_ped_track["cv_annotations"][pose_data_key])
@@ -386,7 +386,6 @@ def main(args: ScriptArguments):
             for ann_k, cog_ann in tqdm(
                 ext_ped_track["cognitive_annotations"].items(),
                 desc="Extracting cognitive annotations",
-                position=2,
                 leave=False,
             ):
                 intent_list = cog_ann["intent"]
@@ -400,7 +399,6 @@ def main(args: ScriptArguments):
                 for frame_k in tqdm(
                     range(len(observed_frames)),
                     desc="Extending intent keyframes",
-                    position=3,
                     leave=False,
                 ):
                     if intent_list[frame_k] == "":
@@ -414,7 +412,6 @@ def main(args: ScriptArguments):
                 for frame_k in tqdm(
                     range(len(observed_frames) - 1, -1, -1),
                     desc="Extending keyframes (backwards)",
-                    position=3,
                     leave=False,
                 ):
                     if description_list[frame_k] == "":
@@ -431,7 +428,6 @@ def main(args: ScriptArguments):
         for ped_k, cog_track in tqdm(
             extended_intent_ann["pedestrians"].items(),
             desc="Ignore 'already-crossed'",
-            position=1,
             leave=False,
         ):
             observed_frames = cog_track["observed_frames"]
@@ -440,7 +436,6 @@ def main(args: ScriptArguments):
             for ann_k, cog_ann in tqdm(
                 cog_track["cognitive_annotations"].items(),
                 desc="Cognitive annotations",
-                position=2,
                 leave=False,
             ):
                 intent_list = cog_ann["intent"]
@@ -449,7 +444,6 @@ def main(args: ScriptArguments):
                 for j in tqdm(
                     range(len(observed_frames) - 1, -1, -1),
                     desc="Frames",
-                    position=3,
                     leave=False,
                 ):
                     if key_frame_list[j] != 0:
