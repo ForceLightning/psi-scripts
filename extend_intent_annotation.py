@@ -104,7 +104,9 @@ def keypoints_to_indexed(
             assert not observed_pose_data[
                 i
             ], f"Observed mask at index {i} must be False!"
-        ret[i] == keypoint
+        else:
+            assert observed_pose_data[i], f"Observed mask at index {i} must be True!"
+        ret[i] = keypoint
 
     assert len(ret) == 17
 
